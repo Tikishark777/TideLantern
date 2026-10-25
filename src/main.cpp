@@ -317,18 +317,37 @@ void clockBackdrop(uint8_t theme){
   }else if(theme==1){
     d.fillCircle(120,120,115,DEEP_SEA);
     d.drawCircle(120,120,115,SEA_GLOW);
-    // Small compass rose, not a sun/weather symbol. No title to waste space.
-    d.drawCircle(120,43,13,SEA_MID);
-    d.drawFastVLine(120,29,28,SEA_GLOW);
-    d.drawFastHLine(106,43,28,SEA_GLOW);
-    d.fillTriangle(120,29,116,45,124,45,SAND);
-    d.fillCircle(120,43,3,WHITE);
-    // Low coastal waterlines remain outside the text rows.
+    // Miniature "Sweeping Beacon" lighthouse, inspired by icon #1.
+    // Drawn from primitive shapes: readable on a 240-pixel display and
+    // decorative only (the warm light is NOT a weather/sun indicator).
+    // Draw the beacon BEHIND the lantern room and lighthouse silhouette.
+    d.fillTriangle(128,33,160,23,160,47,DUSK);
+    d.fillTriangle(128,33,155,27,155,43,SAND);
+    // Slate coastal rocks and white lighthouse tower.
+    d.fillTriangle(92,64,102,54,115,66,SEA_MID);
+    d.fillTriangle(120,66,137,55,148,67,SEA_MID);
+    d.fillTriangle(111,42,125,42,130,64,WHITE);
+    d.fillTriangle(111,42,130,64,107,64,0xAD75);
+    d.fillRect(115,51,3,7,DEEP_SEA);
+    // Lantern room, rail and pitched roof.
+    d.fillRect(108,40,22,3,WHITE);
+    d.fillRect(110,29,18,11,WHITE);
+    d.fillTriangle(107,29,119,20,131,29,WHITE);
+    d.drawFastVLine(119,18,3,WHITE);
+    d.fillRect(113,31,4,7,SAND);
+    d.fillRect(121,31,4,7,SAND);
+    d.fillCircle(119,34,3,DUSK);
+    // Short sea waves and two simple gull marks complete the silhouette.
+    coastalWave(d,67,91,151,SEA_GLOW,2,7);
+    coastalWave(d,72,100,147,SEA_MID,2,37);
+    d.drawLine(144,54,148,51,WHITE);d.drawLine(148,51,152,54,WHITE);
+    d.drawLine(156,58,159,56,WHITE);d.drawLine(159,56,162,58,WHITE);
+    // Low coastal waterlines remain outside the clock text rows.
     coastalWave(d,215,68,172,SEA_GLOW,2,5);
     coastalWave(d,224,83,157,SEA_MID,2,46);
   }else{
+    // Minimal: clean black face and one restrained circular border.
     d.drawCircle(120,120,115,MUTED);
-    d.drawFastHLine(93,52,54,SEA_MID);
   }
 }
 void renderClock(bool force=false){
@@ -368,8 +387,10 @@ void renderClock(bool force=false){
   else snprintf(buf,sizeof(buf),cfg.seconds?"%d:%02d:%02d":"%d:%02d",hour,t.tm_min,t.tm_sec);
   String timeText(buf);
   if(timeText!=lastTime){
-    const int timeY=theme==0?74:theme==1?79:72;
+    const int timeY=theme==0?74:theme==1?79:81;
     clearClockBand(timeY-3,timeY+42,back);
+    // Minimal makes the time the visual focus; optional seconds may
+    // need smaller glyphs to remain inside the circular safe area.
     int size=timeText.length()>8?2:timeText.length()>6?3:theme==2?5:4;
     drawClockText(timeText,timeY,size,WHITE);
     lastTime=timeText;
@@ -383,28 +404,41 @@ void renderClock(bool force=false){
     clearClockBand(117,showDashboardAddress?196:210,back);
     // If we are showing the setup IP, use one compact date line so it cannot
     // clash with the temporary address in the bottom part of the screen.
-    const int subY=theme==0?119:123;
-    const int dayY=theme==0?151:153;
+    const int subY=theme==0?119:theme==1?123:139;
     drawClockText(subtitle,subY,2,theme==1?SAND:WHITE);
     static const char* days[]={"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
     static const char* months[]={"January","February","March","April","May","June","July","August","September","October","November","December"};
-    drawClockText(days[t.tm_wday],dayY,2,theme==2?WHITE:AMBER);
-    if(cfg.dateStyle==0){
-      if(showDashboardAddress){
-        snprintf(buf,sizeof(buf),"%s %d, %04d",months[t.tm_mon],t.tm_mday,t.tm_year+1900);
-        drawClockText(buf,177,1,theme==2?MUTED:AMBER);
-      }else{
-        // Split the long date so even "September 30" has breathing room.
-        snprintf(buf,sizeof(buf),"%s %d",months[t.tm_mon],t.tm_mday);
-        drawClockText(buf,173,2,theme==2?MUTED:AMBER);
-        snprintf(buf,sizeof(buf),"%04d",t.tm_year+1900);
-        drawClockText(buf,192,2,theme==2?MUTED:AMBER);
-      }
+    if(theme==2){
+      // Truly minimal: no weekday or stacked full-date lines. Keep the
+      // stored date preference (US/day-first/ISO), but show a compact
+      // US numeric date when the "Full" date preference is selected.
+      if(cfg.dateStyle==2)
+        snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mday,t.tm_mon+1,t.tm_year+1900);
+      else if(cfg.dateStyle==3)
+        snprintf(buf,sizeof(buf),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
+      else
+        snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mon+1,t.tm_mday,t.tm_year+1900);
+      drawClockText(buf,177,2,WHITE);
     }else{
-      if(cfg.dateStyle==1)snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mon+1,t.tm_mday,t.tm_year+1900);
-      else if(cfg.dateStyle==2)snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mday,t.tm_mon+1,t.tm_year+1900);
-      else snprintf(buf,sizeof(buf),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
-      drawClockText(buf,180,2,theme==2?MUTED:AMBER);
+      const int dayY=theme==0?151:153;
+      drawClockText(days[t.tm_wday],dayY,2,AMBER);
+      if(cfg.dateStyle==0){
+        if(showDashboardAddress){
+          snprintf(buf,sizeof(buf),"%s %d, %04d",months[t.tm_mon],t.tm_mday,t.tm_year+1900);
+          drawClockText(buf,177,1,AMBER);
+        }else{
+          // Split the long date so even "September 30" fits the circle.
+          snprintf(buf,sizeof(buf),"%s %d",months[t.tm_mon],t.tm_mday);
+          drawClockText(buf,173,2,AMBER);
+          snprintf(buf,sizeof(buf),"%04d",t.tm_year+1900);
+          drawClockText(buf,192,2,AMBER);
+        }
+      }else{
+        if(cfg.dateStyle==1)snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mon+1,t.tm_mday,t.tm_year+1900);
+        else if(cfg.dateStyle==2)snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mday,t.tm_mon+1,t.tm_year+1900);
+        else snprintf(buf,sizeof(buf),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
+        drawClockText(buf,180,2,AMBER);
+      }
     }
     lastDate=dateKey;
   }
