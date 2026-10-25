@@ -1,6 +1,6 @@
 # TideLantern — Tides. Weather. Time.
 
-**Your window to the water.** TideLantern is an open-source, dual-display ESP32 marine information station featuring a tide monitor, marine forecast and international clock. **Created and maintained by John Christensen** (GitHub [@Tikishark777](https://github.com/Tikishark777)).
+**Your window to the water.** TideLantern is an open-source, dual-display ESP32 marine information station featuring a tide monitor, marine forecast and international clock.
 
 **Status: v1.0.0 — initial hardware-tested release.** The firmware has compiled successfully through GitHub Actions and has been tested on a physical, dual-GC9A01 ESP32 setup. The clock, tide display, marine forecast, Wi-Fi network scanner, setup portal and local settings dashboard have been demonstrated. As a hobby project that depends on external data services, coverage and forecasts are not guaranteed.
 
