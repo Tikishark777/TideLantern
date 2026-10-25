@@ -35,6 +35,10 @@ DNSServer dns;
 Preferences prefs;
 bool apMode=false, restartRequested=false;
 uint32_t restartAt=0;
+// On an established home Wi-Fi connection, show the dashboard IP for 30
+// seconds after boot. Keep the setup hotspot address visible until setup ends.
+uint32_t dashboardConnectedAt=0;
+constexpr uint32_t DASHBOARD_INTRO_MS=30000UL;
 
 struct Config {
   String site="Seattle, WA";
@@ -102,7 +106,9 @@ void setupNetwork(){
     Serial.println();
   }
   if(WiFi.status()==WL_CONNECTED){
-    apMode=false;Serial.print("Dashboard: http://");Serial.println(WiFi.localIP());
+    apMode=false;
+    dashboardConnectedAt=millis();
+    Serial.print("Dashboard: http://");Serial.println(WiFi.localIP());
     configTime(0,0,"pool.ntp.org","time.google.com","time.cloudflare.com");
     if(MDNS.begin("tidelantern")){
       MDNS.addService("http","tcp",80);
@@ -262,19 +268,26 @@ void renderClock(bool force=false){
   // With optional seconds enabled, refresh just the main time rectangle.
   static String lastTime="",lastDate="",lastConfig="";
   time_t now=time(nullptr);
+  // Hide the address after the boot intro on an already connected unit.
+  // Always show it in hotspot setup mode so first-time users can connect.
+  // Unsigned subtraction remains correct if millis() wraps around.
+  const bool showDashboardAddress=apMode ||
+    (millis()-dashboardConnectedAt < DASHBOARD_INTRO_MS);
   String configKey=String(cfg.clock24)+"/"+String(cfg.leadingZero)+"/"+
     String(cfg.dateStyle)+"/"+String(cfg.tzStyle)+"/"+
-    String(tzOffset)+"/"+displayZone()+"/"+String(apMode);
+    String(tzOffset)+"/"+displayZone()+"/"+String(apMode)+"/"+String(showDashboardAddress);
   bool full=force||configKey!=lastConfig;
   if(full){
     lastConfig=configKey;lastTime="";lastDate="";
     screenClock.fillScreen(BLACK);
     screenClock.drawCircle(120,120,116,BLUE);
     drawCenter(screenClock,"TIDELANTERN",38,1,CYAN);
-    // Keep the settings address readable after connecting to home Wi-Fi.
-    drawCenter(screenClock,apMode?"WIFI SETUP":"SETTINGS PAGE",205,1,CYAN);
-    String ip=apMode?"192.168.4.1":WiFi.localIP().toString();
-    drawCenter(screenClock,ip,219,1,WHITE);
+    // Boot-only help on home Wi-Fi. Keep the setup address until configured.
+    if(showDashboardAddress){
+      drawCenter(screenClock,apMode?"WIFI SETUP":"SETTINGS PAGE",205,1,CYAN);
+      String ip=apMode?"192.168.4.1":WiFi.localIP().toString();
+      drawCenter(screenClock,ip,219,1,WHITE);
+    }
   }
   if(now<1700000000){
     if(full)drawCenter(screenClock,"SYNCING TIME",102,2,WHITE);
@@ -364,7 +377,6 @@ void drawTides(){
     drawCenter(d,s,180,s.length()>18?1:2,WHITE);
     drawCenter(d,String(tides[ix].height,1)+(cfg.units==1?" m":" ft")+"  MLLW",205,1,AMBER);
   }else drawCenter(d,"Next event pending",189,1,AMBER);
-  drawCenter(d,"Schematic NOAA H/L",224,1,MUTED);
 }
 void drawMarine(){
   Adafruit_GC9A01A &d=screenTide;
@@ -382,8 +394,6 @@ void drawMarine(){
   drawCenter(d,wave,148,wave.length()>13?1:2,CYAN);
   String water=isnan(seaTemp)?"SEA --":String("SEA ")+String(seaTemp,0)+(cfg.units==1?" C":" F");
   drawCenter(d,water,176,2,WHITE);
-  drawCenter(d,"MODELED / NOT OBSERVED",204,1,AMBER);
-  drawCenter(d,"Open-Meteo",222,1,MUTED);
 }
 void renderRight(bool force=false){
   static uint32_t lastDraw=0;
