@@ -45,6 +45,7 @@ struct Config {
   String ssid="",password="",station="9447130";
   double lat=47.6026,lon=-122.3393;
   uint8_t view=2,units=0,dateStyle=0,tzStyle=0;
+  uint8_t clockTheme=0,rightTheme=0; // 0 Classic, 1 Coastal, 2 Minimal
   bool clock24=false,seconds=false,leadingZero=false;
 } cfg;
 struct TideEvent {time_t t=0;float height=0;char kind='?';};
@@ -91,6 +92,8 @@ void loadConfig(){
   cfg.units=clamp(prefs.getUChar("units",0),0,1);
   cfg.dateStyle=clamp(prefs.getUChar("date",0),0,3);
   cfg.tzStyle=clamp(prefs.getUChar("tzstyle",0),0,2);
+  cfg.clockTheme=clamp(prefs.getUChar("clktheme",0),0,2);
+  cfg.rightTheme=clamp(prefs.getUChar("rtTheme",0),0,2);
   cfg.clock24=prefs.getBool("clock24",false);
   cfg.seconds=prefs.getBool("seconds",false);
   cfg.leadingZero=prefs.getBool("leadzero",false);
@@ -263,27 +266,56 @@ String displayZone(){
   if(cfg.tzStyle==0&&tzAbbreviation.length()&&tzAbbreviation.length()<=5)return tzAbbreviation;
   return tzOffsetLabel();
 }
+// Dedicated display palettes. GPIO and SPI configuration are unchanged.
+constexpr uint16_t DEEP_SEA=0x0020, SEA_MID=0x0290,
+                   SEA_GLOW=0x25BA, SAND=0xF632, DUSK=0xFC90;
+void coastalWave(Adafruit_GFX &d,int y,int left,int right,uint16_t color,int amplitude,int phase){
+  int px=left,py=y;
+  for(int x=left;x<=right;x+=2){
+    int waveY=y+lroundf(sinf((x+phase)*0.045f)*amplitude);
+    if(x>left)d.drawLine(px,py,x,waveY,color);
+    px=x;py=waveY;
+  }
+}
+void clockBackdrop(uint8_t theme){
+  Adafruit_GC9A01A &d=screenClock;
+  d.fillScreen(BLACK);
+  if(theme==0){
+    d.drawCircle(120,120,116,BLUE);
+    drawCenter(d,"TIDELANTERN",38,1,CYAN);
+  }else if(theme==1){
+    d.fillCircle(120,120,115,DEEP_SEA);
+    d.drawCircle(120,120,115,SEA_GLOW);
+    drawCenter(d,"TIDELANTERN",20,1,SEA_GLOW);
+    // A simple coastal sunrise. All graphics are drawn natively on the GC9A01.
+    d.fillCircle(120,57,13,DUSK);
+    d.drawFastHLine(73,72,94,SEA_MID);
+    coastalWave(d,210,52,188,SEA_GLOW,4,5);
+    coastalWave(d,220,70,170,SEA_MID,3,46);
+  }else{
+    d.drawCircle(120,120,115,MUTED);
+    d.drawFastHLine(81,64,78,SEA_MID);
+  }
+}
 void renderClock(bool force=false){
-  // Full-screen redraw happens only on first render or when settings change.
-  // With optional seconds enabled, refresh just the main time rectangle.
+  // Preserve the old clock data, formats and 30-second Wi-Fi intro.
+  // Seconds change only the time rectangle; the static scenery is not redrawn.
   static String lastTime="",lastDate="",lastConfig="";
   time_t now=time(nullptr);
-  // Hide the address after the boot intro on an already connected unit.
-  // Always show it in hotspot setup mode so first-time users can connect.
-  // Unsigned subtraction remains correct if millis() wraps around.
   const bool showDashboardAddress=apMode ||
     (millis()-dashboardConnectedAt < DASHBOARD_INTRO_MS);
   String configKey=String(cfg.clock24)+"/"+String(cfg.leadingZero)+"/"+
     String(cfg.dateStyle)+"/"+String(cfg.tzStyle)+"/"+
-    String(tzOffset)+"/"+displayZone()+"/"+String(apMode)+"/"+String(showDashboardAddress);
+    String(tzOffset)+"/"+displayZone()+"/"+String(apMode)+"/"+
+    String(showDashboardAddress)+"/"+String(cfg.clockTheme);
   bool full=force||configKey!=lastConfig;
+  const uint8_t theme=cfg.clockTheme;
   if(full){
     lastConfig=configKey;lastTime="";lastDate="";
-    screenClock.fillScreen(BLACK);
-    screenClock.drawCircle(120,120,116,BLUE);
-    drawCenter(screenClock,"TIDELANTERN",38,1,CYAN);
-    // Boot-only help on home Wi-Fi. Keep the setup address until configured.
+    clockBackdrop(theme);
+    // Network instructions appear on startup, then vanish automatically.
     if(showDashboardAddress){
+      if(theme!=0)screenClock.fillRect(54,202,132,33,theme==1?DEEP_SEA:BLACK);
       drawCenter(screenClock,apMode?"WIFI SETUP":"SETTINGS PAGE",205,1,CYAN);
       String ip=apMode?"192.168.4.1":WiFi.localIP().toString();
       drawCenter(screenClock,ip,219,1,WHITE);
@@ -296,13 +328,18 @@ void renderClock(bool force=false){
   time_t local=now+tzOffset;struct tm t{};gmtime_r(&local,&t);
   int hour=t.tm_hour;
   if(!cfg.clock24){hour%=12;if(hour==0)hour=12;}
-  char buf[36];
-  if(cfg.clock24||cfg.leadingZero)snprintf(buf,sizeof(buf),cfg.seconds?"%02d:%02d:%02d":"%02d:%02d",hour,t.tm_min,t.tm_sec);
+  char buf[64];
+  if(cfg.clock24||cfg.leadingZero)
+    snprintf(buf,sizeof(buf),cfg.seconds?"%02d:%02d:%02d":"%02d:%02d",hour,t.tm_min,t.tm_sec);
   else snprintf(buf,sizeof(buf),cfg.seconds?"%d:%02d:%02d":"%d:%02d",hour,t.tm_min,t.tm_sec);
   String timeText(buf);
+  const uint16_t back=theme==1?DEEP_SEA:BLACK;
   if(timeText!=lastTime){
-    screenClock.fillRect(15,71,210,39,BLACK);
-    drawCenter(screenClock,timeText,74,timeText.length()>6?3:4,WHITE);
+    const int y=theme==0?74:theme==1?85:88;
+    screenClock.fillRect(12,y-3,216,42,back);
+    int size=timeText.length()>6?3:theme==2?5:4;
+    if(timeText.length()>8)size=2;
+    drawCenter(screenClock,timeText,y,size,WHITE);
     lastTime=timeText;
   }
   String zone=displayZone();
@@ -310,16 +347,20 @@ void renderClock(bool force=false){
   String subtitle=period+(zone.length()?(period.length()?"  ":"")+zone:"");
   String dateKey=String(t.tm_yday)+"/"+String(t.tm_year)+"/"+subtitle;
   if(dateKey!=lastDate){
-    screenClock.fillRect(12,114,216,86,BLACK);
-    drawCenter(screenClock,subtitle,119,subtitle.length()>13?1:2,WHITE);
+    // Leave the static coastal waves at y>=207 untouched.
+    int sy=theme==0?119:theme==1?129:132;
+    int dayY=theme==0?155:theme==1?160:166;
+    int dateY=theme==0?181:theme==1?185:193;
+    screenClock.fillRect(12,sy-4,216,theme==0?86:theme==1?76:75,back);
+    drawCenter(screenClock,subtitle,sy,subtitle.length()>13?1:2,theme==1?SAND:WHITE);
     static const char* days[]={"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
     static const char* months[]={"January","February","March","April","May","June","July","August","September","October","November","December"};
-    drawCenter(screenClock,days[t.tm_wday],155,2,AMBER);
+    drawCenter(screenClock,days[t.tm_wday],dayY,theme==2?1:2,theme==2?WHITE:AMBER);
     if(cfg.dateStyle==0)snprintf(buf,sizeof(buf),"%s %d, %04d",months[t.tm_mon],t.tm_mday,t.tm_year+1900);
     else if(cfg.dateStyle==1)snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mon+1,t.tm_mday,t.tm_year+1900);
     else if(cfg.dateStyle==2)snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mday,t.tm_mon+1,t.tm_year+1900);
     else snprintf(buf,sizeof(buf),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
-    drawCenter(screenClock,buf,181,strlen(buf)>18?1:2,AMBER);
+    drawCenter(screenClock,buf,dateY,strlen(buf)>18?1:2,theme==2?MUTED:AMBER);
     lastDate=dateKey;
   }
 }
@@ -333,6 +374,93 @@ float tideHeightAt(time_t target){
   return NAN;
 }
 int nextTideIndex(time_t now){for(int i=0;i<tideCount;i++)if(tides[i].t>now)return i;return -1;}
+// Theme-only graph: interpolated between NOAA high/low predictions.
+// Never present this schematic curve as a live measured water level.
+void themeTideCurve(Adafruit_GFX &d,int x0,int x1,int y0,int y1,bool filled){
+  if(tideCount<2)return;
+  float low=100000,high=-100000;
+  for(int i=0;i<tideCount;i++){
+    low=min(low,tides[i].height);high=max(high,tides[i].height);
+  }
+  if(high-low<0.5f)high=low+0.5f;
+  time_t now=time(nullptr),start=now-6*3600,end=now+18*3600;
+  int px=0,py=0;bool pen=false;
+  const int baseline=y1;
+  for(int x=x0;x<=x1;x++){
+    time_t sample=start+(time_t)((double)(end-start)*(x-x0)/(x1-x0));
+    float value=tideHeightAt(sample);
+    if(isnan(value)){pen=false;continue;}
+    int y=clamp(y1-lroundf((value-low)/(high-low)*(y1-y0)),y0,y1);
+    if(filled&&((x-x0)%2==0))d.drawFastVLine(x,y,max(1,baseline-y),SEA_MID);
+    if(pen)d.drawLine(px,py,x,y,SEA_GLOW);
+    px=x;py=y;pen=true;
+  }
+  const int nowX=x0+(x1-x0)/4;
+  for(int y=y0;y<=y1;y+=5)d.drawPixel(nowX,y,SAND);
+}
+void rightBackdrop(bool coastal){
+  Adafruit_GC9A01A &d=screenTide;
+  d.fillScreen(BLACK);
+  if(coastal){d.fillCircle(120,120,114,DEEP_SEA);d.drawCircle(120,120,115,SEA_GLOW);}
+  else d.drawCircle(120,120,115,MUTED);
+}
+void drawThemedTides(){
+  Adafruit_GC9A01A &d=screenTide;
+  const bool coastal=cfg.rightTheme==1;
+  rightBackdrop(coastal);
+  drawCenter(d,compact(cfg.site,21),24,1,coastal?SAND:MUTED);
+  if(tideCount<2){
+    drawCenter(d,"TIDE DATA",81,2,WHITE);
+    drawCenter(d,WiFi.status()==WL_CONNECTED?"UNAVAILABLE":"WI-FI SETUP",112,2,AMBER);
+    drawCenter(d,WiFi.status()==WL_CONNECTED?"Try marine view":"192.168.4.1",155,1,CYAN);
+    return;
+  }
+  const int next=nextTideIndex(time(nullptr));
+  if(next<0){drawCenter(d,"WAITING FOR TIDES",109,2,AMBER);return;}
+  const bool high=tides[next].kind=='H';
+  drawCenter(d,high?"NEXT HIGH TIDE":"NEXT LOW TIDE",48,coastal?2:1,coastal?CYAN:WHITE);
+  const String height=String(tides[next].height,1)+(cfg.units==1?" m":" ft");
+  drawCenter(d,height,79,height.length()>8?3:4,WHITE);
+  // Use the saved time-zone and 12/24-hour choice as on the Classic screen.
+  drawCenter(d,timeLocal(tides[next].t),119,2,coastal?SAND:CYAN);
+  if(coastal){
+    themeTideCurve(d,45,195,145,188,true);
+    drawCenter(d,"-6h      NOW      +18h",201,1,MUTED);
+    coastalWave(d,219,72,168,SEA_GLOW,3,25);
+  }else{
+    d.drawFastHLine(78,151,84,SEA_MID);
+    themeTideCurve(d,48,192,168,198,false);
+    drawCenter(d,"PREDICTED HIGH / LOW",216,1,MUTED);
+  }
+}
+void drawThemedMarine(){
+  Adafruit_GC9A01A &d=screenTide;
+  const bool coastal=cfg.rightTheme==1;
+  rightBackdrop(coastal);
+  drawCenter(d,compact(cfg.site,21),24,1,coastal?SAND:MUTED);
+  drawCenter(d,coastal?"MARINE CONDITIONS":"WIND",47,coastal?2:1,CYAN);
+  String wind=isnan(windKn)?"-- kn":String(windKn,0)+" kn";
+  drawCenter(d,wind,82,wind.length()>7?3:4,WHITE);
+  String dir=isnan(windDegrees)?"Direction --":String(windDegrees,0)+" deg";
+  if(!isnan(gustKn))dir+="  G "+String(gustKn,0);
+  drawCenter(d,dir,124,1,coastal?SAND:MUTED);
+  if(coastal){
+    d.drawFastHLine(62,144,116,SEA_MID);
+    // A wave icon denotes the category of the metric, not a weather forecast.
+    coastalWave(d,152,93,147,SEA_GLOW,4,0);
+    String wave=isnan(waveHeight)?"WAVES --":String("WAVES ")+String(waveHeight,1)+(cfg.units==1?" m":" ft");
+    drawCenter(d,wave,166,wave.length()>13?1:2,CYAN);
+    String sea=isnan(seaTemp)?"SEA --":String("SEA ")+String(seaTemp,0)+(cfg.units==1?" C":" F");
+    drawCenter(d,sea,191,2,WHITE);
+    coastalWave(d,216,72,168,SEA_MID,3,44);
+  }else{
+    d.drawFastHLine(67,144,106,SEA_MID);
+    String wave=isnan(waveHeight)?"WAVES --":String("WAVES ")+String(waveHeight,1)+(cfg.units==1?" m":" ft");
+    drawCenter(d,wave,159,wave.length()>13?1:2,WHITE);
+    String sea=isnan(seaTemp)?"SEA --":String("SEA ")+String(seaTemp,0)+(cfg.units==1?" C":" F");
+    drawCenter(d,sea,193,2,MUTED);
+  }
+}
 void drawTides(){
   Adafruit_GC9A01A &d=screenTide;
   d.fillScreen(BLACK);d.drawCircle(120,120,115,BLUE);
@@ -401,13 +529,15 @@ void renderRight(bool force=false){
   int mode=cfg.view==2?int((millis()/20000UL)%2):int(cfg.view);
   if(!force&&lastMode==mode&&millis()-lastDraw<12000UL)return;
   lastMode=mode;lastDraw=millis();
-  if(mode==0)drawTides();else drawMarine();
+  if(cfg.rightTheme==0){if(mode==0)drawTides();else drawMarine();}
+  else if(mode==0)drawThemedTides();else drawThemedMarine();
 }
 void respondState(){
   JsonDocument d;
   d["siteName"]=cfg.site;d["lat"]=cfg.lat;d["lon"]=cfg.lon;
   d["stationId"]=cfg.station;d["view"]=cfg.view;d["units"]=cfg.units;
   d["clock24"]=cfg.clock24;d["dateStyle"]=cfg.dateStyle;d["tzStyle"]=cfg.tzStyle;
+  d["clockTheme"]=cfg.clockTheme;d["rightTheme"]=cfg.rightTheme;
   d["seconds"]=cfg.seconds;d["leadingZero"]=cfg.leadingZero;
   d["timezone"]=tzName;d["zoneLabel"]=displayZone();
   d["windKn"]=nullptr;
@@ -452,6 +582,8 @@ void applySettings(){
     if(cfg.station!=id){cfg.station=id;prefs.putString("station",id);placeChanged=true;}
   }
   if(server.hasArg("view")){cfg.view=clamp(server.arg("view").toInt(),0,2);prefs.putUChar("view",cfg.view);}
+  if(server.hasArg("clockTheme")){cfg.clockTheme=clamp(server.arg("clockTheme").toInt(),0,2);prefs.putUChar("clktheme",cfg.clockTheme);}
+  if(server.hasArg("rightTheme")){cfg.rightTheme=clamp(server.arg("rightTheme").toInt(),0,2);prefs.putUChar("rtTheme",cfg.rightTheme);}
   if(server.hasArg("units")){
     uint8_t unit=clamp(server.arg("units").toInt(),0,1);
     if(unit!=cfg.units){cfg.units=unit;prefs.putUChar("units",unit);marineChanged=true;}
