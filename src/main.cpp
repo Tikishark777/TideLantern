@@ -277,6 +277,37 @@ void coastalWave(Adafruit_GFX &d,int y,int left,int right,uint16_t color,int amp
     px=x;py=waveY;
   }
 }
+// Use the available chord of the round LCD, not the full 240-pixel
+// rectangular framebuffer, when sizing lower clock text.
+int clockChordWidth(int y,int fontSize){
+  constexpr int R=107; // inner safe radius, with a margin from the bezel
+  const int bottom=y+8*fontSize+1;
+  const int distance=max(abs(y-120),abs(bottom-120));
+  if(distance>=R)return 0;
+  return max(0,2*(int)sqrtf(float(R*R-distance*distance))-8);
+}
+void drawClockText(const String &value,int y,int maxSize,uint16_t color){
+  int size=maxSize;
+  while(size>1){
+    screenClock.setTextSize(size);
+    int16_t x0,y0;uint16_t w,h;
+    screenClock.getTextBounds(value,0,0,&x0,&y0,&w,&h);
+    if((int)w<=clockChordWidth(y,size))break;
+    size--;
+  }
+  // The fallback uses the original built-in font at 1x: always centered.
+  drawCenter(screenClock,value,y,size,color);
+}
+// Clear only the interior of the circular clock. A rectangular fill can
+// create visible corners outside the round face in the Coastal theme.
+void clearClockBand(int top,int bottom,uint16_t color){
+  constexpr int R=112;
+  for(int y=max(8,top);y<=min(232,bottom);y++){
+    int dy=y-120;
+    int width=(int)sqrtf(float(R*R-dy*dy));
+    screenClock.drawFastHLine(120-width,y,2*width+1,color);
+  }
+}
 void clockBackdrop(uint8_t theme){
   Adafruit_GC9A01A &d=screenClock;
   d.fillScreen(BLACK);
@@ -286,20 +317,22 @@ void clockBackdrop(uint8_t theme){
   }else if(theme==1){
     d.fillCircle(120,120,115,DEEP_SEA);
     d.drawCircle(120,120,115,SEA_GLOW);
-    drawCenter(d,"TIDELANTERN",20,1,SEA_GLOW);
-    // A simple coastal sunrise. All graphics are drawn natively on the GC9A01.
-    d.fillCircle(120,57,13,DUSK);
-    d.drawFastHLine(73,72,94,SEA_MID);
-    coastalWave(d,210,52,188,SEA_GLOW,4,5);
-    coastalWave(d,220,70,170,SEA_MID,3,46);
+    // Small compass rose, not a sun/weather symbol. No title to waste space.
+    d.drawCircle(120,43,13,SEA_MID);
+    d.drawFastVLine(120,29,28,SEA_GLOW);
+    d.drawFastHLine(106,43,28,SEA_GLOW);
+    d.fillTriangle(120,29,116,45,124,45,SAND);
+    d.fillCircle(120,43,3,WHITE);
+    // Low coastal waterlines remain outside the text rows.
+    coastalWave(d,215,68,172,SEA_GLOW,2,5);
+    coastalWave(d,224,83,157,SEA_MID,2,46);
   }else{
     d.drawCircle(120,120,115,MUTED);
-    d.drawFastHLine(81,64,78,SEA_MID);
+    d.drawFastHLine(93,52,54,SEA_MID);
   }
 }
 void renderClock(bool force=false){
-  // Preserve the old clock data, formats and 30-second Wi-Fi intro.
-  // Seconds change only the time rectangle; the static scenery is not redrawn.
+  // Existing date/zone preferences and 30-second Wi-Fi intro are preserved.
   static String lastTime="",lastDate="",lastConfig="";
   time_t now=time(nullptr);
   const bool showDashboardAddress=apMode ||
@@ -310,19 +343,20 @@ void renderClock(bool force=false){
     String(showDashboardAddress)+"/"+String(cfg.clockTheme);
   bool full=force||configKey!=lastConfig;
   const uint8_t theme=cfg.clockTheme;
+  const uint16_t back=theme==1?DEEP_SEA:BLACK;
   if(full){
     lastConfig=configKey;lastTime="";lastDate="";
     clockBackdrop(theme);
-    // Network instructions appear on startup, then vanish automatically.
     if(showDashboardAddress){
-      if(theme!=0)screenClock.fillRect(54,202,132,33,theme==1?DEEP_SEA:BLACK);
-      drawCenter(screenClock,apMode?"WIFI SETUP":"SETTINGS PAGE",205,1,CYAN);
-      String ip=apMode?"192.168.4.1":WiFi.localIP().toString();
-      drawCenter(screenClock,ip,219,1,WHITE);
+      // Temporarily replace the low coastal waves with readable setup info.
+      clearClockBand(201,233,back);
+      drawClockText(apMode?"WIFI SETUP":"SETTINGS PAGE",205,1,CYAN);
+      const String ip=apMode?"192.168.4.1":WiFi.localIP().toString();
+      drawClockText(ip,219,1,WHITE);
     }
   }
   if(now<1700000000){
-    if(full)drawCenter(screenClock,"SYNCING TIME",102,2,WHITE);
+    if(full)drawClockText("SYNCING TIME",102,2,WHITE);
     return;
   }
   time_t local=now+tzOffset;struct tm t{};gmtime_r(&local,&t);
@@ -333,34 +367,45 @@ void renderClock(bool force=false){
     snprintf(buf,sizeof(buf),cfg.seconds?"%02d:%02d:%02d":"%02d:%02d",hour,t.tm_min,t.tm_sec);
   else snprintf(buf,sizeof(buf),cfg.seconds?"%d:%02d:%02d":"%d:%02d",hour,t.tm_min,t.tm_sec);
   String timeText(buf);
-  const uint16_t back=theme==1?DEEP_SEA:BLACK;
   if(timeText!=lastTime){
-    const int y=theme==0?74:theme==1?85:88;
-    screenClock.fillRect(12,y-3,216,42,back);
-    int size=timeText.length()>6?3:theme==2?5:4;
-    if(timeText.length()>8)size=2;
-    drawCenter(screenClock,timeText,y,size,WHITE);
+    const int timeY=theme==0?74:theme==1?79:72;
+    clearClockBand(timeY-3,timeY+42,back);
+    int size=timeText.length()>8?2:timeText.length()>6?3:theme==2?5:4;
+    drawClockText(timeText,timeY,size,WHITE);
     lastTime=timeText;
   }
   String zone=displayZone();
-  String period=cfg.clock24?"":t.tm_hour>=12?"PM":"AM";
-  String subtitle=period+(zone.length()?(period.length()?"  ":"")+zone:"");
+  const String period=cfg.clock24?"":t.tm_hour>=12?"PM":"AM";
+  // One ordinary space instead of the previous double-space between PM/PDT.
+  const String subtitle=period+(zone.length()?(period.length()?" ":"")+zone:"");
   String dateKey=String(t.tm_yday)+"/"+String(t.tm_year)+"/"+subtitle;
   if(dateKey!=lastDate){
-    // Leave the static coastal waves at y>=207 untouched.
-    int sy=theme==0?119:theme==1?129:132;
-    int dayY=theme==0?155:theme==1?160:166;
-    int dateY=theme==0?181:theme==1?185:193;
-    screenClock.fillRect(12,sy-4,216,theme==0?86:theme==1?76:75,back);
-    drawCenter(screenClock,subtitle,sy,subtitle.length()>13?1:2,theme==1?SAND:WHITE);
+    clearClockBand(117,showDashboardAddress?196:210,back);
+    // If we are showing the setup IP, use one compact date line so it cannot
+    // clash with the temporary address in the bottom part of the screen.
+    const int subY=theme==0?119:123;
+    const int dayY=theme==0?151:153;
+    drawClockText(subtitle,subY,2,theme==1?SAND:WHITE);
     static const char* days[]={"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
     static const char* months[]={"January","February","March","April","May","June","July","August","September","October","November","December"};
-    drawCenter(screenClock,days[t.tm_wday],dayY,theme==2?1:2,theme==2?WHITE:AMBER);
-    if(cfg.dateStyle==0)snprintf(buf,sizeof(buf),"%s %d, %04d",months[t.tm_mon],t.tm_mday,t.tm_year+1900);
-    else if(cfg.dateStyle==1)snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mon+1,t.tm_mday,t.tm_year+1900);
-    else if(cfg.dateStyle==2)snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mday,t.tm_mon+1,t.tm_year+1900);
-    else snprintf(buf,sizeof(buf),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
-    drawCenter(screenClock,buf,dateY,strlen(buf)>18?1:2,theme==2?MUTED:AMBER);
+    drawClockText(days[t.tm_wday],dayY,2,theme==2?WHITE:AMBER);
+    if(cfg.dateStyle==0){
+      if(showDashboardAddress){
+        snprintf(buf,sizeof(buf),"%s %d, %04d",months[t.tm_mon],t.tm_mday,t.tm_year+1900);
+        drawClockText(buf,177,1,theme==2?MUTED:AMBER);
+      }else{
+        // Split the long date so even "September 30" has breathing room.
+        snprintf(buf,sizeof(buf),"%s %d",months[t.tm_mon],t.tm_mday);
+        drawClockText(buf,173,2,theme==2?MUTED:AMBER);
+        snprintf(buf,sizeof(buf),"%04d",t.tm_year+1900);
+        drawClockText(buf,192,2,theme==2?MUTED:AMBER);
+      }
+    }else{
+      if(cfg.dateStyle==1)snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mon+1,t.tm_mday,t.tm_year+1900);
+      else if(cfg.dateStyle==2)snprintf(buf,sizeof(buf),"%02d/%02d/%04d",t.tm_mday,t.tm_mon+1,t.tm_year+1900);
+      else snprintf(buf,sizeof(buf),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
+      drawClockText(buf,180,2,theme==2?MUTED:AMBER);
+    }
     lastDate=dateKey;
   }
 }
@@ -438,7 +483,7 @@ void drawThemedMarine(){
   const bool coastal=cfg.rightTheme==1;
   rightBackdrop(coastal);
   drawCenter(d,compact(cfg.site,21),24,1,coastal?SAND:MUTED);
-  drawCenter(d,coastal?"MARINE CONDITIONS":"WIND",47,coastal?2:1,CYAN);
+  drawCenter(d,coastal?"WIND & SEA":"WIND",47,coastal?2:1,CYAN);
   String wind=isnan(windKn)?"-- kn":String(windKn,0)+" kn";
   drawCenter(d,wind,82,wind.length()>7?3:4,WHITE);
   String dir=isnan(windDegrees)?"Direction --":String(windDegrees,0)+" deg";
@@ -452,7 +497,9 @@ void drawThemedMarine(){
     drawCenter(d,wave,166,wave.length()>13?1:2,CYAN);
     String sea=isnan(seaTemp)?"SEA --":String("SEA ")+String(seaTemp,0)+(cfg.units==1?" C":" F");
     drawCenter(d,sea,191,2,WHITE);
-    coastalWave(d,216,72,168,SEA_MID,3,44);
+    // Two curved turquoise coastlines make this distinct from Minimal mode.
+    coastalWave(d,215,68,172,SEA_GLOW,2,8);
+    coastalWave(d,224,83,157,SEA_MID,2,44);
   }else{
     d.drawFastHLine(67,144,106,SEA_MID);
     String wave=isnan(waveHeight)?"WAVES --":String("WAVES ")+String(waveHeight,1)+(cfg.units==1?" m":" ft");
