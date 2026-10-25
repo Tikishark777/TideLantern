@@ -134,8 +134,17 @@ time_t readUTC(const char *str){
   int y=0,mo=0,d=0,h=0,mi=0;
   if(sscanf(str,"%d-%d-%d %d:%d",&y,&mo,&d,&h,&mi)!=5)return 0;
   if(y<2024||mo<1||mo>12||d<1||d>31||h>23||mi>59)return 0;
-  struct tm tm{};tm.tm_year=y-1900;tm.tm_mon=mo-1;tm.tm_mday=d;tm.tm_hour=h;tm.tm_min=mi;tm.tm_isdst=0;
-  return timegm(&tm);
+  // Convert a UTC calendar date to Unix time without non-portable timegm().
+  // Civil-date arithmetic handles leap years and does not depend on the
+  // device's configured local timezone or daylight-saving settings.
+  const int year=y-(mo<=2);
+  const int era=(year>=0?year:year-399)/400;
+  const unsigned yearOfEra=(unsigned)(year-era*400);
+  const unsigned monthFromMarch=(unsigned)(mo+(mo>2?-3:9));
+  const unsigned dayOfYear=(153*monthFromMarch+2)/5+(unsigned)d-1;
+  const unsigned dayOfEra=yearOfEra*365+yearOfEra/4-yearOfEra/100+dayOfYear;
+  const int64_t days=(int64_t)era*146097+(int64_t)dayOfEra-719468;
+  return (time_t)(days*86400LL+(int64_t)h*3600LL+(int64_t)mi*60LL);
 }
 String dateUTC(time_t utc){char b[16];struct tm t{};gmtime_r(&utc,&t);strftime(b,sizeof(b),"%Y%m%d",&t);return String(b);}
 String timeLocal(time_t utc,bool withDate=false){
@@ -229,7 +238,7 @@ void refreshWeather(){
       marineOkay=true;
     }
   }
-  if(weatherOkay||marineOkay){lastWeatherSuccess=millis();weatherError=(!marineOkay?"Marine model unavailable; ":"")+(!weatherOkay?"Wind forecast unavailable":"");}
+  if(weatherOkay||marineOkay){lastWeatherSuccess=millis();weatherError=String(!marineOkay?"Marine model unavailable; ":"")+(!weatherOkay?"Wind forecast unavailable":"");}
   else weatherError=error.length()?error:"Forecast unavailable";
   Serial.printf("Forecast: wind %.1f kn, wave %.1f\n",windKn,waveHeight);
 }
