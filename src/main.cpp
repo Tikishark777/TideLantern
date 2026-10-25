@@ -79,6 +79,26 @@ void drawCenter(Adafruit_GFX &d,const String &s,int y,int font,uint16_t color){
   d.setCursor(max(0,(240-(int)w)/2),y);d.print(s);
 }
 String compact(const String &s,size_t length){return s.length()<=length?s:s.substring(0,length);}
+// Keep long location names entirely inside the curved glass, not simply
+// within the LCD's square 240px framebuffer. The full name remains saved.
+void drawSiteLabel(Adafruit_GFX &d,const String &name,int y,uint16_t color){
+  constexpr int SAFE_R=112;  // inside the 115px outer circle
+  const int dY=max(abs(y-120),abs(y+9-120)); // built-in font at 1x is 8px high
+  if(dY>=SAFE_R)return;
+  const int maxWidth=max(0,2*(int)sqrtf(float(SAFE_R*SAFE_R-dY*dY))-10);
+  String text=name;
+  d.setTextSize(1);
+  while(text.length()){
+    const String candidate=(text.length()<name.length())?text+"...":text;
+    int16_t x0,y0;uint16_t w,h;
+    d.getTextBounds(candidate,0,0,&x0,&y0,&w,&h);
+    if((int)w<=maxWidth){drawCenter(d,candidate,y,1,color);return;}
+    // Remove a whole UTF-8 codepoint to avoid cutting in the middle of one.
+    size_t n=text.length()-1;
+    while(n>0&&(((uint8_t)text[n]&0xC0)==0x80))n--;
+    text.remove(n);
+  }
+}
 
 void loadConfig(){
   prefs.begin("tidelantern",false);
@@ -317,31 +337,9 @@ void clockBackdrop(uint8_t theme){
   }else if(theme==1){
     d.fillCircle(120,120,115,DEEP_SEA);
     d.drawCircle(120,120,115,SEA_GLOW);
-    // Miniature "Sweeping Beacon" lighthouse, inspired by icon #1.
-    // Drawn from primitive shapes: readable on a 240-pixel display and
-    // decorative only (the warm light is NOT a weather/sun indicator).
-    // Draw the beacon BEHIND the lantern room and lighthouse silhouette.
-    d.fillTriangle(128,33,160,23,160,47,DUSK);
-    d.fillTriangle(128,33,155,27,155,43,SAND);
-    // Slate coastal rocks and white lighthouse tower.
-    d.fillTriangle(92,64,102,54,115,66,SEA_MID);
-    d.fillTriangle(120,66,137,55,148,67,SEA_MID);
-    d.fillTriangle(111,42,125,42,130,64,WHITE);
-    d.fillTriangle(111,42,130,64,107,64,0xAD75);
-    d.fillRect(115,51,3,7,DEEP_SEA);
-    // Lantern room, rail and pitched roof.
-    d.fillRect(108,40,22,3,WHITE);
-    d.fillRect(110,29,18,11,WHITE);
-    d.fillTriangle(107,29,119,20,131,29,WHITE);
-    d.drawFastVLine(119,18,3,WHITE);
-    d.fillRect(113,31,4,7,SAND);
-    d.fillRect(121,31,4,7,SAND);
-    d.fillCircle(119,34,3,DUSK);
-    // Short sea waves and two simple gull marks complete the silhouette.
-    coastalWave(d,67,91,151,SEA_GLOW,2,7);
-    coastalWave(d,72,100,147,SEA_MID,2,37);
-    d.drawLine(144,54,148,51,WHITE);d.drawLine(148,51,152,54,WHITE);
-    d.drawLine(156,58,159,56,WHITE);d.drawLine(159,56,162,58,WHITE);
+    // A single, calm turquoise wave replaces the miniature lighthouse.
+    // Decorative only: it conveys the marine theme, not weather conditions.
+    coastalWave(d,47,76,164,SEA_GLOW,5,12);
     // Low coastal waterlines remain outside the clock text rows.
     coastalWave(d,215,68,172,SEA_GLOW,2,5);
     coastalWave(d,224,83,157,SEA_MID,2,46);
@@ -487,7 +485,7 @@ void drawThemedTides(){
   Adafruit_GC9A01A &d=screenTide;
   const bool coastal=cfg.rightTheme==1;
   rightBackdrop(coastal);
-  drawCenter(d,compact(cfg.site,21),24,1,coastal?SAND:MUTED);
+  drawSiteLabel(d,cfg.site,34,coastal?SAND:MUTED);
   if(tideCount<2){
     drawCenter(d,"TIDE DATA",81,2,WHITE);
     drawCenter(d,WiFi.status()==WL_CONNECTED?"UNAVAILABLE":"WI-FI SETUP",112,2,AMBER);
@@ -516,7 +514,7 @@ void drawThemedMarine(){
   Adafruit_GC9A01A &d=screenTide;
   const bool coastal=cfg.rightTheme==1;
   rightBackdrop(coastal);
-  drawCenter(d,compact(cfg.site,21),24,1,coastal?SAND:MUTED);
+  drawSiteLabel(d,cfg.site,34,coastal?SAND:MUTED);
   drawCenter(d,coastal?"WIND & SEA":"WIND",47,coastal?2:1,CYAN);
   String wind=isnan(windKn)?"-- kn":String(windKn,0)+" kn";
   drawCenter(d,wind,82,wind.length()>7?3:4,WHITE);
@@ -546,7 +544,7 @@ void drawTides(){
   Adafruit_GC9A01A &d=screenTide;
   d.fillScreen(BLACK);d.drawCircle(120,120,115,BLUE);
   drawCenter(d,"TIDE PREDICTIONS",25,1,CYAN);
-  drawCenter(d,compact(cfg.site,20),42,1,WHITE);
+  drawSiteLabel(d,cfg.site,42,WHITE);
   time_t now=time(nullptr);
   if(tideCount<2){
     if(WiFi.status()!=WL_CONNECTED){
@@ -591,7 +589,7 @@ void drawMarine(){
   Adafruit_GC9A01A &d=screenTide;
   d.fillScreen(BLACK);d.drawCircle(120,120,115,BLUE);
   drawCenter(d,"MARINE FORECAST",24,1,CYAN);
-  drawCenter(d,compact(cfg.site,20),40,1,WHITE);
+  drawSiteLabel(d,cfg.site,40,WHITE);
   drawCenter(d,"WIND",64,1,MUTED);
   if(isnan(windKn))drawCenter(d,"-- kn",83,3,WHITE);
   else drawCenter(d,String(windKn,0)+" kn",81,3,WHITE);
