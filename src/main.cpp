@@ -12,6 +12,7 @@
 #include <HTTPClient.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include <ESPmDNS.h>
 #include <Preferences.h>
 #include <SPI.h>
 #include <Adafruit_GFX.h>
@@ -103,6 +104,10 @@ void setupNetwork(){
   if(WiFi.status()==WL_CONNECTED){
     apMode=false;Serial.print("Dashboard: http://");Serial.println(WiFi.localIP());
     configTime(0,0,"pool.ntp.org","time.google.com","time.cloudflare.com");
+    if(MDNS.begin("tidelantern")){
+      MDNS.addService("http","tcp",80);
+      Serial.println("Dashboard shortcut: http://tidelantern.local/");
+    }
   }else{
     WiFi.mode(WIFI_AP_STA);
     apMode=true;
@@ -266,8 +271,10 @@ void renderClock(bool force=false){
     screenClock.fillScreen(BLACK);
     screenClock.drawCircle(120,120,116,BLUE);
     drawCenter(screenClock,"TIDELANTERN",38,1,CYAN);
-    String ip=apMode?"SETUP 192.168.4.1":WiFi.localIP().toString();
-    drawCenter(screenClock,ip,220,1,MUTED);
+    // Keep the settings address readable after connecting to home Wi-Fi.
+    drawCenter(screenClock,apMode?"WIFI SETUP":"SETTINGS PAGE",205,1,CYAN);
+    String ip=apMode?"192.168.4.1":WiFi.localIP().toString();
+    drawCenter(screenClock,ip,219,1,WHITE);
   }
   if(now<1700000000){
     if(full)drawCenter(screenClock,"SYNCING TIME",102,2,WHITE);
@@ -290,7 +297,7 @@ void renderClock(bool force=false){
   String subtitle=period+(zone.length()?(period.length()?"  ":"")+zone:"");
   String dateKey=String(t.tm_yday)+"/"+String(t.tm_year)+"/"+subtitle;
   if(dateKey!=lastDate){
-    screenClock.fillRect(12,114,216,93,BLACK);
+    screenClock.fillRect(12,114,216,86,BLACK);
     drawCenter(screenClock,subtitle,119,subtitle.length()>13?1:2,WHITE);
     static const char* days[]={"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
     static const char* months[]={"January","February","March","April","May","June","July","August","September","October","November","December"};
@@ -474,12 +481,50 @@ void handlePlaceSearch(){
   lastSearchQuery=q;lastSearchResult=body;
   server.send(200,"application/json",body);
 }
+// Return nearby Wi-Fi networks for a friendlier phone-based setup portal.
+// The ESP32 supports scanning in AP+STA mode while the setup hotspot stays on.
+void handleWifiScan(){
+  int found=WiFi.scanNetworks(false,false);
+  if(found<0)return sendError(503,"Wi-Fi scan failed. Try Scan again or type the name manually.");
+  JsonDocument d;
+  JsonArray networks=d["networks"].to<JsonArray>();
+  for(int i=0;i<found&&networks.size()<40;i++){
+    String name=WiFi.SSID(i);
+    if(!name.length())continue;
+    bool duplicate=false;
+    for(JsonObject item:networks){if(item["ssid"].as<String>()==name){duplicate=true;break;}}
+    if(duplicate)continue;
+    JsonObject item=networks.add<JsonObject>();
+    item["ssid"]=name;
+    item["rssi"]=WiFi.RSSI(i);
+    item["secure"]=WiFi.encryptionType(i)!=WIFI_AUTH_OPEN;
+  }
+  WiFi.scanDelete();
+  String response;serializeJson(d,response);
+  server.sendHeader("Cache-Control","no-store");
+  server.send(200,"application/json",response);
+}
+void handleNetworkStatus(){
+  JsonDocument d;
+  bool connected=WiFi.status()==WL_CONNECTED;
+  d["connected"]=connected;
+  d["setupMode"]=apMode;
+  d["ip"]=connected?WiFi.localIP().toString():"192.168.4.1";
+  d["ssid"]=connected?WiFi.SSID():"";
+  d["hostname"]="tidelantern.local";
+  String response;serializeJson(d,response);
+  server.sendHeader("Cache-Control","no-store");
+  server.send(200,"application/json",response);
+}
 void handleWifi(){
   String ssid=server.arg("ssid"),pass=server.arg("password");
-  if(!ssid.length()||ssid.length()>32||pass.length()<8||pass.length()>64)return sendError(400,"Enter a Wi-Fi name and valid password (8–64 characters)");
+  if(!ssid.length()||ssid.length()>32||
+     (pass.length()&& (pass.length()<8||pass.length()>64)))
+    return sendError(400,"Enter a Wi-Fi name and a valid password (8–64 characters if secured)");
   prefs.putString("ssid",ssid);prefs.putString("password",pass);
-  server.send(200,"application/json","{\"message\":\"Wi-Fi saved. Restarting now.\"}");
-  restartRequested=true;restartAt=millis()+1300;
+  server.send(200,"application/json","{\"message\":\"Wi-Fi saved. Reconnect your phone to home Wi-Fi, then use the IP shown on TideLantern's clock.\"}");
+  // Leave time for the phone to show the instructions before rebooting.
+  restartRequested=true;restartAt=millis()+8500;
 }
 void registerRoutes(){
   server.on("/",HTTP_GET,[](){server.send_P(200,"text/html; charset=utf-8",WEB_UI);});
@@ -488,6 +533,8 @@ void registerRoutes(){
   server.on("/api/settings",HTTP_POST,applySettings);
   server.on("/api/search",HTTP_GET,handlePlaceSearch);
   server.on("/api/wifi",HTTP_POST,handleWifi);
+  server.on("/api/wifi/scan",HTTP_GET,handleWifiScan);
+  server.on("/api/network",HTTP_GET,handleNetworkStatus);
   server.on("/generate_204",HTTP_GET,[](){server.sendHeader("Location","/",true);server.send(302,"text/plain","");});
   server.on("/hotspot-detect.html",HTTP_GET,[](){server.sendHeader("Location","/",true);server.send(302,"text/plain","");});
   server.onNotFound([](){if(apMode){server.sendHeader("Location","/",true);server.send(302,"text/plain","");}else server.send(404,"text/plain","Not found");});
