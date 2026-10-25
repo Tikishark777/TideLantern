@@ -2,7 +2,7 @@
 
 **Your window to the water.** An open-source ESP32 desk instrument with two 1.28-inch round displays: an international clock and a tide / marine-conditions display. Developed as a distinct marine project by **John Christensen ([@Tikishark777](https://github.com/Tikishark777))** with AI-assisted design and implementation.
 
-**STATUS: v0.1.0 hardware-test preview.** The source and automated build/installer are prepared, but this initial release has **not yet passed a real GitHub Actions build or been tested on ESP32 hardware**. Please treat the first upload as a build-validation milestone, not a finished product. Protect any working SkyOrb device by using a separate ESP32 for experiments.
+**STATUS: v0.1.x hardware-test preview.** GitHub Actions firmware build #2 and the installer deployment completed successfully; this is still early firmware and is being tested on real ESP32 hardware. Wi-Fi setup now scans nearby networks and displays the settings-page address on the clock. Protect any working SkyOrb device by using a separate ESP32 for experiments.
 
 ## Website and browser installer
 
@@ -44,12 +44,13 @@ Keep the supply at 3.3V as required by the modules used in the original build. C
 
 1. Flash the firmware using the installer, after the new GitHub Actions build succeeds.
 2. Join Wi-Fi network **`TideLantern-Setup`** with password **`Tides2026!`** (only when the device is not yet connected to home Wi-Fi).
-3. Open **http://192.168.4.1** and save your **2.4 GHz** home Wi-Fi credentials.
-4. Rejoin your home Wi-Fi and open the device IP printed along the bottom of the clock screen (and the serial monitor at 115200 baud).
-5. Search for a waterway or enter latitude and longitude, select an appropriate NOAA station, and press **Save waterway & station**.
-6. Select the right display's tide/marine mode, your measurement units, and international clock options.
+3. Open **http://192.168.4.1/setup** on your phone. In the Wi-Fi setup page, tap **Scan nearby Wi-Fi** to see a list of reachable **2.4 GHz** hotspots. Use the search box to filter the list, tap your router, enter the password, and select **Save Wi-Fi & restart**. You can also type a hidden network's SSID manually.
+4. **After the ESP32 restarts, return your phone to your normal home Wi-Fi.** Look at the **bottom of the left round clock display**: the **SETTINGS PAGE** label shows TideLantern's IP address. Open `http://<that IP>/` in your phone browser (for example `http://192.168.1.123/`, using *your own* displayed address). You can optionally try **http://tidelantern.local/**, but mDNS is not supported on every network.
+5. If the setup hotspot reappears instead of the normal clock, verify the password and the 2.4 GHz network. If the dashboard will not open, ensure your phone and TideLantern can reach one another on the same local network (guest networks and some mesh/router subnets may isolate devices).
+6. Search for a waterway or enter latitude and longitude, select an appropriate NOAA station, and press **Save waterway & station**.
+7. Select the right display's tide/marine mode, your measurement units, and international clock options.
 
-The phone and ESP32 must be able to reach one another on the same local network. TideLantern's local HTTP dashboard is intended for a **trusted home Wi-Fi network**, not the public Internet.
+The phone and ESP32 must be able to reach one another on the same local network. TideLantern's local HTTP dashboard is intended for a **trusted home Wi-Fi network**, not the public Internet. If your router assigns TideLantern a new IP later, use the current address shown on the clock; you can reserve its IP in your router settings for a permanent address. Avoid guest networks or phone cellular switching during setup.
 
 ## Tide and weather data handling
 
