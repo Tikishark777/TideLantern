@@ -1,6 +1,6 @@
 # TideLantern — Tides. Weather. Time.
 
-**Your window to the water.** An open-source ESP32 desk instrument with two 1.28-inch round displays: an international clock and a tide / marine-conditions display. Developed as a distinct marine project by **John Christensen ([@Tikishark777](https://github.com/Tikishark777))** with AI-assisted design and implementation.
+**Your window to the water.** An open-source ESP32 desk instrument with two 1.28-inch round displays: an international clock and a tide / marine-conditions display. Developed as a distinct marine project by **John Christensen ([@Tikishark777](https://github.com/Tikishark777))**
 
 **STATUS: v0.1.x hardware-test preview.** GitHub Actions firmware build #2 and the installer deployment completed successfully; this is still early firmware and is being tested on real ESP32 hardware. Wi-Fi setup now scans nearby networks and displays the settings-page address on the clock. Protect any working SkyOrb device by using a separate ESP32 for experiments.
 
