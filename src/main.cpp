@@ -108,7 +108,7 @@ void loadConfig(){
   cfg.station=prefs.getString("station",cfg.station);
   cfg.lat=prefs.getDouble("lat",cfg.lat);
   cfg.lon=prefs.getDouble("lon",cfg.lon);
-  cfg.view=clamp(prefs.getUChar("view",2),0,2);
+  cfg.view=clamp(prefs.getUChar("view",2),0,4);
   cfg.units=clamp(prefs.getUChar("units",0),0,1);
   cfg.dateStyle=clamp(prefs.getUChar("date",0),0,3);
   cfg.tzStyle=clamp(prefs.getUChar("tzstyle",0),0,2);
@@ -602,13 +602,42 @@ void drawMarine(){
   String water=isnan(seaTemp)?"SEA --":String("SEA ")+String(seaTemp,0)+(cfg.units==1?" C":" F");
   drawCenter(d,water,176,2,WHITE);
 }
+// Third optional screen: AIR and SEA temperatures from the Open-Meteo
+// values already fetched by refreshWeather(). No new service or sensor.
+// Use "--" when the marine model does not supply a temperature.
+void drawTemperatures(){
+  Adafruit_GC9A01A &d=screenTide;
+  const bool coastal=cfg.rightTheme==1;
+  const bool minimal=cfg.rightTheme==2;
+  if(coastal)rightBackdrop(true);
+  else{d.fillScreen(BLACK);d.drawCircle(120,120,115,minimal?MUTED:BLUE);}
+  drawCenter(d,minimal?"AIR / SEA":"TEMPERATURES",19,1,coastal?SEA_GLOW:CYAN);
+  drawSiteLabel(d,cfg.site,35,coastal?SAND:WHITE);
+  drawCenter(d,"AIR TEMPERATURE",62,1,coastal?SAND:MUTED);
+  String air=isnan(airTemp)?"--":String(airTemp,0)+(cfg.units==1?" C":" F");
+  drawCenter(d,air,81,air.length()>7?3:4,WHITE);
+  d.drawFastHLine(55,129,130,coastal?SEA_GLOW:BLUE);
+  drawCenter(d,"SEA TEMPERATURE",148,1,coastal?SEA_GLOW:MUTED);
+  String water=isnan(seaTemp)?"--":String(seaTemp,0)+(cfg.units==1?" C":" F");
+  drawCenter(d,water,166,water.length()>8?2:3,WHITE);
+  // Small graphic accent, but no fake sun or forecast-weather icon.
+  if(coastal){
+    coastalWave(d,211,86,154,SEA_GLOW,2,9);
+    coastalWave(d,219,94,146,SEA_MID,2,39);
+  }
+}
 void renderRight(bool force=false){
   static uint32_t lastDraw=0;
   static int lastMode=-1;
-  int mode=cfg.view==2?int((millis()/20000UL)%2):int(cfg.view);
+  // Preserve existing view values: 0 Tide; 1 Marine; 2 their 20s rotation.
+  // New: 3 Temperature-only; 4 rotate Tide/Marine/Temperature (20s each).
+  const int mode=cfg.view==2?int((millis()/20000UL)%2):
+                 cfg.view==4?int((millis()/20000UL)%3):
+                 cfg.view==3?2:int(cfg.view);
   if(!force&&lastMode==mode&&millis()-lastDraw<12000UL)return;
   lastMode=mode;lastDraw=millis();
-  if(cfg.rightTheme==0){if(mode==0)drawTides();else drawMarine();}
+  if(mode==2)drawTemperatures();
+  else if(cfg.rightTheme==0){if(mode==0)drawTides();else drawMarine();}
   else if(mode==0)drawThemedTides();else drawThemedMarine();
 }
 void respondState(){
@@ -660,7 +689,7 @@ void applySettings(){
     for(size_t i=0;i<id.length();i++)if(!isalnum((uint8_t)id[i]))return sendError(400,"Invalid NOAA station ID");
     if(cfg.station!=id){cfg.station=id;prefs.putString("station",id);placeChanged=true;}
   }
-  if(server.hasArg("view")){cfg.view=clamp(server.arg("view").toInt(),0,2);prefs.putUChar("view",cfg.view);}
+  if(server.hasArg("view")){cfg.view=clamp(server.arg("view").toInt(),0,4);prefs.putUChar("view",cfg.view);}
   if(server.hasArg("clockTheme")){cfg.clockTheme=clamp(server.arg("clockTheme").toInt(),0,2);prefs.putUChar("clktheme",cfg.clockTheme);}
   if(server.hasArg("rightTheme")){cfg.rightTheme=clamp(server.arg("rightTheme").toInt(),0,2);prefs.putUChar("rtTheme",cfg.rightTheme);}
   if(server.hasArg("units")){
@@ -674,10 +703,10 @@ void applySettings(){
   if(server.hasArg("leadingZero")){cfg.leadingZero=server.arg("leadingZero")=="1";prefs.putBool("leadzero",cfg.leadingZero);}
   if(placeChanged){
     tidePending=true;weatherPending=true;
-    tideCount=0;windKn=NAN;waveHeight=NAN;seaTemp=NAN;
+    tideCount=0;windKn=NAN;waveHeight=NAN;seaTemp=NAN;airTemp=NAN;
     lastTideAttempt=0;lastWeatherAttempt=0;
     tideError="Awaiting new location predictions";
-  }else if(marineChanged){tidePending=true;weatherPending=true;tideCount=0;lastTideAttempt=0;lastWeatherAttempt=0;}
+  }else if(marineChanged){tidePending=true;weatherPending=true;tideCount=0;airTemp=NAN;seaTemp=NAN;waveHeight=NAN;lastTideAttempt=0;lastWeatherAttempt=0;}
   renderClock(true);renderRight(true);
   server.send(200,"application/json","{\"message\":\"Saved! Displays update immediately; data refreshes shortly.\"}");
 }
